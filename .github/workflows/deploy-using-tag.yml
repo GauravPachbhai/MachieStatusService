@@ -1,0 +1,57 @@
+name: Deploy to VPS
+
+# Trigger deployment on version tags like v1.0.0
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout (not strictly required, but fine to keep)
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2️⃣ Setup SSH (ONLY for VPS login)
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      # 3️⃣ Deploy to VPS
+      - name: Deploy to VPS
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << EOF
+            set -e
+
+            DEPLOY_DIR="/var/www/machienstatus-service"
+            REPO_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+            TAG_NAME="${{ github.ref_name }}"
+
+            echo "Deploying tag: \$TAG_NAME"
+
+            echo "Cleaning old deploy directory..."
+            rm -rf "\$DEPLOY_DIR"
+            mkdir -p "\$DEPLOY_DIR"
+
+            echo "Cloning repository..."
+            git clone "\$REPO_URL" "\$DEPLOY_DIR"
+            cd "\$DEPLOY_DIR"
+
+            echo "Checking out tag..."
+            git checkout "\$TAG_NAME"
+
+            echo "Installing dependencies..."
+            npm ci --omit=dev
+
+            echo "Starting PM2..."
+            pm2 delete machienstatus-service || true
+            TZ="Asia/Kolkata" pm2 start index.js --name "machienstatus-service"
+            pm2 save
+
+            pm2 status
+            echo "Deployment completed successfully!"
+          EOF
