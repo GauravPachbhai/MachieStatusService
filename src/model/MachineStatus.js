@@ -1,0 +1,1 @@
+export { default } from "./machineStatus.model.js";
