@@ -1,6 +1,7 @@
 import Machine from "../model/Machine.js";
 import MachineStatus from "../model/MachineStatus.js";
 import MoulditDevice from "../model/MoulditDevice.js";
+import { startDowntime, endDowntime } from "./Downtime.service.js";
 
 const DOWN_THRESHOLD_MINUTES = 10;
 
@@ -50,7 +51,7 @@ export const evaluateMachineStatuses = async () => {
             if (currentProdcount !== previousProdcount) {
               status = "RUNNING"; // increment or reset
             } else {
-              status = "RUNNING";
+              status = "DOWN";
             }
           }
         } else {
@@ -58,6 +59,15 @@ export const evaluateMachineStatuses = async () => {
         }
       }
 
+      // Fetch previous status to detect changes
+      const previousStatus = await MachineStatus.findOne({
+        imei,
+        date: today,
+      });
+
+      const oldStatus = previousStatus?.status;
+
+      // Update machine status
       await MachineStatus.findOneAndUpdate(
         { imei, date: today },
         {
@@ -72,6 +82,21 @@ export const evaluateMachineStatuses = async () => {
         },
         { upsert: true, returnDocument: "after" }
       );
+
+      // Track status changes and manage downtimes
+      if (oldStatus && oldStatus !== status) {
+        // Status changed from RUNNING/IDLE to DOWN
+        if (status === "DOWN" && oldStatus !== "DOWN") {
+          await startDowntime(machine._id);
+        }
+        // Status changed from DOWN to RUNNING
+        else if (status === "RUNNING" && oldStatus === "DOWN") {
+          await endDowntime(machine._id);
+        }
+      } else if (!oldStatus && status === "DOWN") {
+        // First status check and machine is DOWN
+        await startDowntime(machine._id);
+      }
 
     } catch (err) {
       console.error(`Error processing machine ${machine.id}`, err);
