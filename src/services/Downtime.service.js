@@ -31,7 +31,16 @@ export const startDowntime = async (machine_id) => {
         });
 
         if (existingDowntime) {
-            console.log(`Machine ${machine_id} already has an active downtime`);
+            // Calculate current duration even if still active
+            const durationHours = calculateDurationInHours(
+                existingDowntime.startTime,
+                now
+            );
+
+            existingDowntime.machinedownByHR = durationHours;
+            await existingDowntime.save();
+
+            console.log(`Updated active downtime for Machine ${machine_id}. Current duration: ${durationHours.toFixed(2)} hours`);
             return existingDowntime;
         }
 
@@ -47,6 +56,7 @@ export const startDowntime = async (machine_id) => {
             company_id: machine.customer_id,
             date: today,
             startTime: now,
+            machinedownByHR: 0, // Initial value
             isActive: true,
             reason: "Machine Status: DOWN",
         });
@@ -54,7 +64,7 @@ export const startDowntime = async (machine_id) => {
         console.log(`Started downtime tracking for machine ${machine_id} at ${now}`);
         return downtime;
     } catch (error) {
-        console.error(`Error starting downtime for machine ${machine_id}:`, error);
+        console.error(`Error starting/updating downtime for machine ${machine_id}:`, error);
         throw error;
     }
 };

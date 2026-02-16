@@ -84,18 +84,12 @@ export const evaluateMachineStatuses = async () => {
       );
 
       // Track status changes and manage downtimes
-      if (oldStatus && oldStatus !== status) {
-        // Status changed from RUNNING/IDLE to DOWN
-        if (status === "DOWN" && oldStatus !== "DOWN") {
-          await startDowntime(machine._id);
-        }
-        // Status changed from DOWN to RUNNING
-        else if (status === "RUNNING" && oldStatus === "DOWN") {
-          await endDowntime(machine._id);
-        }
-      } else if (!oldStatus && status === "DOWN") {
-        // First status check and machine is DOWN
+      // 🔑 CHANGE: Always call startDowntime if status is DOWN to update machinedownByHR
+      if (status === "DOWN") {
         await startDowntime(machine._id);
+      } else if (oldStatus === "DOWN" && status !== "DOWN") {
+        // Status changed from DOWN to something else
+        await endDowntime(machine._id);
       }
 
     } catch (err) {
