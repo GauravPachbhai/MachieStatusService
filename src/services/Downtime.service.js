@@ -24,19 +24,18 @@ export const startDowntime = async (machine_id) => {
         const now = new Date();
         const today = getISODate(now);
 
-        // Check if there's already an active downtime for this machine
+        // ✅ FIX: Check for active downtime TODAY only
         const existingDowntime = await Downtime.findOne({
             machine_id,
+            date: today,           // ← ADD THIS
             isActive: true,
         });
 
         if (existingDowntime) {
-            // Calculate current duration even if still active
             const durationHours = calculateDurationInHours(
                 existingDowntime.startTime,
                 now
             );
-
             existingDowntime.machinedownByHR = durationHours;
             await existingDowntime.save();
 
@@ -56,7 +55,7 @@ export const startDowntime = async (machine_id) => {
             company_id: machine.customer_id,
             date: today,
             startTime: now,
-            machinedownByHR: 0, // Initial value
+            machinedownByHR: 0,
             isActive: true,
             reason: "Machine Status: DOWN",
         });
@@ -77,25 +76,25 @@ export const startDowntime = async (machine_id) => {
 export const endDowntime = async (machine_id) => {
     try {
         const now = new Date();
+        const today = getISODate(now);
 
-        // Find the active downtime for this machine
+        // ✅ FIX: Also check today's date here
         const activeDowntime = await Downtime.findOne({
             machine_id,
+            date: today,           // ← ADD THIS
             isActive: true,
         });
 
         if (!activeDowntime) {
-            console.log(`No active downtime found for machine ${machine_id}`);
+            console.log(`No active downtime found for machine ${machine_id} today`);
             return null;
         }
 
-        // Calculate duration
         const durationHours = calculateDurationInHours(
             activeDowntime.startTime,
             now
         );
 
-        // Update the downtime record
         activeDowntime.endTime = now;
         activeDowntime.machinedownByHR = durationHours;
         activeDowntime.isActive = false;

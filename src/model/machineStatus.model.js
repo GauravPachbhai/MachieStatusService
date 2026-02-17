@@ -32,6 +32,12 @@ const MachineStatusSchema = new mongoose.Schema(
 
     lastSeenAt: Date,
     evaluatedAt: Date,
+
+    // Track when same-prodcount condition started (for 10-minute threshold)
+    downStartedAt: {
+      type: Date,
+      required: false,
+    },
   },
   {
     timestamps: true,
