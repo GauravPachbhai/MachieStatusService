@@ -62,15 +62,15 @@ export const evaluateMachineStatuses = async () => {
           } else {
             // Same production count - apply 10-minute threshold
             // Only mark DOWN if same condition has been ongoing for 10+ minutes
-            
+
             // Check if this is a continuation of same condition or a new condition
             const wasRunningBefore = previousStatus && previousStatus.status === "RUNNING";
             const hadDownStartedAt = previousStatus && previousStatus.downStartedAt;
-            
-            if (hadDownStartedAt && !wasRunningBefore) {
+            console.log(`wasRunningBefore ${wasRunningBefore}, hadDownStartedAt ${hadDownStartedAt}`);
+            if (hadDownStartedAt) {
               // Continuing from same prodcount condition - use existing entry point
               const timeElapsed = (now - new Date(previousStatus.downStartedAt)) / (1000 * 60); // minutes
-              
+              console.log(`timeElapsed ${timeElapsed}, Downtime Thershold ${DOWN_THRESHOLD_MINUTES}`);
               if (timeElapsed >= DOWN_THRESHOLD_MINUTES) {
                 // 10+ minutes of same prodcount = DOWN
                 status = "DOWN";
@@ -96,15 +96,13 @@ export const evaluateMachineStatuses = async () => {
         }
       } else {
         // No data - apply 10-minute threshold
-        
-        // Check if this is a continuation or a new condition
-        const wasRunningBefore = previousStatus && previousStatus.status === "RUNNING";
-        const hadDownStartedAt = previousStatus && previousStatus.downStartedAt;
-        
-        if (hadDownStartedAt && !wasRunningBefore) {
+
+        // Check if this is a continuation or a new condition        const hadDownStartedAt = previousStatus && previousStatus.downStartedAt;
+
+        if (previousStatus && previousStatus.downStartedAt) {
           // Continuing from NO_DATA condition - use existing entry point
           const timeElapsed = (now - new Date(previousStatus.downStartedAt)) / (1000 * 60); // minutes
-          
+
           if (timeElapsed >= DOWN_THRESHOLD_MINUTES) {
             status = "DOWN";
             downReason = "NO_DATA_10MIN";

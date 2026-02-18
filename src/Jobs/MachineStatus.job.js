@@ -21,5 +21,5 @@ export const startMachineStatusJob = () => {
     } finally {
       isRunning = false;
     }
-  }, 60 * 5000); // Every 1 minute
+  }, 60 * 1000); // Every 1 minute
 };
