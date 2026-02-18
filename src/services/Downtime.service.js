@@ -24,32 +24,34 @@ export const startDowntime = async (machine_id) => {
         const now = new Date();
         const today = getISODate(now);
 
-        // ✅ FIX: Check for active downtime TODAY only
+        // Find ANY existing downtime record for this machine + date (active or not)
         const existingDowntime = await Downtime.findOne({
             machine_id,
-            date: today,           // ← ADD THIS
-            isActive: true,
+            date: today,
         });
 
         if (existingDowntime) {
-            const durationHours = calculateDurationInHours(
-                existingDowntime.startTime,
-                now
-            );
-            existingDowntime.machinedownByHR = durationHours;
-            await existingDowntime.save();
-
-            console.log(`Updated active downtime for Machine ${machine_id}. Current duration: ${durationHours.toFixed(2)} hours`);
+            if (existingDowntime.isActive) {
+                // Already active — no changes needed, duration will be calculated in endDowntime
+                const currentSegmentHours = calculateDurationInHours(existingDowntime.startTime, now);
+                console.log(`Downtime already active for Machine ${machine_id}. Previous segments: ${(existingDowntime.machinedownByHR || 0).toFixed(2)}h, Current segment: ${currentSegmentHours.toFixed(2)}h`);
+            } else {
+                // Was inactive (previous DOWN ended) — reactivate with a new segment
+                existingDowntime.isActive = true;
+                existingDowntime.startTime = now; // New segment starts now
+                existingDowntime.endTime = undefined; // Clear previous endTime
+                await existingDowntime.save();
+                console.log(`Reactivated existing downtime for Machine ${machine_id}. Accumulated hours so far: ${(existingDowntime.machinedownByHR || 0).toFixed(2)}`);
+            }
             return existingDowntime;
         }
 
-        // Fetch machine to get company_id
+        // No record exists for today — create a new one
         const machine = await Machine.findById(machine_id).select("customer_id");
         if (!machine) {
             throw new Error(`Machine ${machine_id} not found`);
         }
 
-        // Create new downtime record
         const downtime = await Downtime.create({
             machine_id,
             company_id: machine.customer_id,
@@ -78,10 +80,9 @@ export const endDowntime = async (machine_id) => {
         const now = new Date();
         const today = getISODate(now);
 
-        // ✅ FIX: Also check today's date here
         const activeDowntime = await Downtime.findOne({
             machine_id,
-            date: today,           // ← ADD THIS
+            date: today,
             isActive: true,
         });
 
@@ -90,18 +91,20 @@ export const endDowntime = async (machine_id) => {
             return null;
         }
 
-        const durationHours = calculateDurationInHours(
+        // Calculate duration of THIS segment only
+        const segmentDurationHours = calculateDurationInHours(
             activeDowntime.startTime,
             now
         );
 
+        // Accumulate: add this segment's duration to existing total
+        activeDowntime.machinedownByHR = (activeDowntime.machinedownByHR || 0) + segmentDurationHours;
         activeDowntime.endTime = now;
-        activeDowntime.machinedownByHR = durationHours;
         activeDowntime.isActive = false;
         await activeDowntime.save();
 
         console.log(
-            `Ended downtime for machine ${machine_id}. Duration: ${durationHours.toFixed(2)} hours`
+            `Ended downtime for machine ${machine_id}. Segment: ${segmentDurationHours.toFixed(2)}h, Total today: ${activeDowntime.machinedownByHR.toFixed(2)}h`
         );
         return activeDowntime;
     } catch (error) {
@@ -149,7 +152,7 @@ export const splitDowntimesAtMidnight = async () => {
                 );
 
                 downtime.endTime = endOfYesterday;
-                downtime.machinedownByHR = durationHours;
+                downtime.machinedownByHR = (downtime.machinedownByHR || 0) + durationHours;
                 downtime.isActive = false;
                 await downtime.save();
 
