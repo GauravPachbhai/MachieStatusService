@@ -1,10 +1,19 @@
 import Downtime from "../model/Downtime.model.js";
 import Machine from "../model/Machine.js";
 
+import Customer from "../model/Customer.js";
+
 /**
- * Get the ISO date string (YYYY-MM-DD) from a Date object
+ * Get the ISO date string (YYYY-MM-DD) from a Date object in a specific timezone
  */
-const getISODate = (date) => date.toISOString().split("T")[0];
+const getISODate = (date, timezone = "Asia/Kolkata") => {
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(date);
+};
 
 /**
  * Calculate duration in hours between two dates
@@ -21,8 +30,15 @@ const calculateDurationInHours = (startTime, endTime) => {
  */
 export const startDowntime = async (machine_id) => {
     try {
+        const machine = await Machine.findById(machine_id).select("customer_id");
+        if (!machine) {
+            throw new Error(`Machine ${machine_id} not found`);
+        }
+
+        const customer = await Customer.findById(machine.customer_id).select("timezone");
+        const timezone = customer?.timezone || "Asia/Kolkata";
         const now = new Date();
-        const today = getISODate(now);
+        const today = getISODate(now, timezone);
 
         // Find ANY existing downtime record for this machine + date (active or not)
         const existingDowntime = await Downtime.findOne({
@@ -50,12 +66,6 @@ export const startDowntime = async (machine_id) => {
             return existingDowntime;
         }
 
-        // No record exists for today — create a new one
-        const machine = await Machine.findById(machine_id).select("customer_id");
-        if (!machine) {
-            throw new Error(`Machine ${machine_id} not found`);
-        }
-
         const downtime = await Downtime.create({
             machine_id,
             company_id: machine.customer_id,
@@ -81,8 +91,12 @@ export const startDowntime = async (machine_id) => {
  */
 export const endDowntime = async (machine_id) => {
     try {
+        const machine = await Machine.findById(machine_id).select("customer_id");
+        const customer = await Customer.findById(machine?.customer_id).select("timezone");
+        const timezone = customer?.timezone || "Asia/Kolkata";
+
         const now = new Date();
-        const today = getISODate(now);
+        const today = getISODate(now, timezone);
 
         const activeDowntime = await Downtime.findOne({
             machine_id,
@@ -124,65 +138,60 @@ export const endDowntime = async (machine_id) => {
  */
 export const splitDowntimesAtMidnight = async () => {
     try {
-        const now = new Date();
-        const currentDate = getISODate(now);
-
-        // Create midnight timestamp for end of previous day (23:59:59.999)
-        const endOfYesterday = new Date(now);
-        endOfYesterday.setHours(23, 59, 59, 999);
-        endOfYesterday.setDate(endOfYesterday.getDate() - 1);
-        const yesterdayDate = getISODate(endOfYesterday);
-
-        // Create midnight timestamp for start of today (00:00:00.000)
-        const startOfToday = new Date(now);
-        startOfToday.setHours(0, 0, 0, 0);
-
-        // Find all active downtimes from yesterday
-        const activeDowntimes = await Downtime.find({
-            isActive: true,
-            date: yesterdayDate,
-        });
-
-        console.log(`Found ${activeDowntimes.length} active downtimes to split at midnight`);
+        const activeDowntimes = await Downtime.find({ isActive: true });
+        console.log(`Found ${activeDowntimes.length} active downtimes to evaluate for midnight split`);
 
         let splitCount = 0;
 
         for (const downtime of activeDowntimes) {
             try {
-                // Close the yesterday's downtime at 23:59:59
-                const durationHours = calculateDurationInHours(
-                    downtime.startTime,
-                    endOfYesterday
-                );
+                const customer = await Customer.findById(downtime.company_id).select("timezone");
+                const timezone = customer?.timezone || "Asia/Kolkata";
 
-                downtime.endTime = endOfYesterday;
-                downtime.machinedownByHR = (downtime.machinedownByHR || 0) + durationHours;
-                downtime.isActive = false;
-                await downtime.save();
+                const now = new Date();
+                const currentDate = getISODate(now, timezone);
 
-                // Create new downtime for today starting at 00:00:00
-                await Downtime.create({
-                    machine_id: downtime.machine_id,
-                    company_id: downtime.company_id,
-                    date: currentDate,
-                    startTime: startOfToday,
-                    isActive: true,
-                    reason: downtime.reason,
-                });
+                // If the record's date is different from today in the customer's timezone, it needs splitting
+                if (downtime.date !== currentDate) {
+                    console.log(`Splitting downtime for machine ${downtime.machine_id} (Date: ${downtime.date}, Today in IST: ${currentDate})`);
 
-                splitCount++;
-                console.log(
-                    `Split downtime for machine ${downtime.machine_id} across day boundary`
-                );
+                    // Create midnight timestamp for end of that record's day in customer's timezone
+                    // Using 23:59:59.999 in the customer's timezone
+                    const endOfThatDay = new Date(new Date(downtime.date + "T23:59:59.999").toLocaleString("en-US", { timeZone: timezone }));
+
+                    // Actually, a cleaner way to get the exact midnight boundary in UTC for that timezone:
+                    const startOfNextDay = new Date(new Date(currentDate + "T00:00:00.000").toLocaleString("en-US", { timeZone: timezone }));
+                    const endOfPrevDay = new Date(startOfNextDay.getTime() - 1);
+
+                    // Close the previous downtime
+                    const durationHours = calculateDurationInHours(
+                        downtime.startTime,
+                        endOfPrevDay
+                    );
+
+                    downtime.endTime = endOfPrevDay;
+                    downtime.machinedownByHR = (downtime.machinedownByHR || 0) + durationHours;
+                    downtime.isActive = false;
+                    await downtime.save();
+
+                    // Create new downtime for today starting at 00:00:00
+                    await Downtime.create({
+                        machine_id: downtime.machine_id,
+                        company_id: downtime.company_id,
+                        date: currentDate,
+                        startTime: startOfNextDay,
+                        isActive: true,
+                        reason: downtime.reason,
+                    });
+
+                    splitCount++;
+                }
             } catch (error) {
-                console.error(
-                    `Error splitting downtime ${downtime._id}:`,
-                    error
-                );
+                console.error(`Error splitting downtime ${downtime._id}:`, error);
             }
         }
 
-        console.log(`Successfully split ${splitCount} downtimes at midnight`);
+        console.log(`Successfully split ${splitCount} downtimes across day boundaries`);
         return splitCount;
     } catch (error) {
         console.error("Error in splitDowntimesAtMidnight:", error);

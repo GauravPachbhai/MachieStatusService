@@ -5,14 +5,23 @@ import { startDowntime, endDowntime } from "./Downtime.service.js";
 
 const DOWN_THRESHOLD_MINUTES = 10;
 
-const getISODate = (date) => date.toISOString().split("T")[0];
-const isSameDay = (d1, d2) => getISODate(d1) === getISODate(d2);
+import Customer from "../model/Customer.js";
+
+const getISODate = (date, timezone = "Asia/Kolkata") => {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+};
+
+const isSameDay = (d1, d2, timezone = "Asia/Kolkata") => getISODate(d1, timezone) === getISODate(d2, timezone);
 
 export const evaluateMachineStatuses = async () => {
   const now = new Date();
-  const today = getISODate(now);
 
-  const machines = await Machine.find({ is_active: true }).select("_id id");
+  const machines = await Machine.find({ is_active: true }).select("_id id customer_id");
 
   for (const machine of machines) {
     try {
@@ -26,6 +35,10 @@ export const evaluateMachineStatuses = async () => {
       const records = await MoulditDevice.find({ imei })
         .sort({ createdAt: -1 })
         .limit(2);
+
+      const customer = await Customer.findById(machine.customer_id).select("timezone");
+      const timezone = customer?.timezone || "Asia/Kolkata";
+      const today = getISODate(now, timezone);
 
       // ✅ Fetch previous status FIRST (needed for 10-minute threshold logic)
       const previousStatus = await MachineStatus.findOne({
@@ -51,8 +64,8 @@ export const evaluateMachineStatuses = async () => {
           previousProdcount = previous.Prodcount ?? 0;
         }
 
-        // 🔑 CHECK: Is latest telemetry from today?
-        if (isSameDay(latest.createdAt, now)) {
+        // 🔑 CHECK: Is latest telemetry from today in customer's timezone?
+        if (isSameDay(latest.createdAt, now, timezone)) {
           // ✅ PRIORITY: Production count change is the authoritative indicator
           if (currentProdcount !== previousProdcount) {
             // Production count changed = machine is RUNNING
