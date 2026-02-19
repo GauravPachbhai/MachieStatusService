@@ -32,14 +32,18 @@ export const startDowntime = async (machine_id) => {
 
         if (existingDowntime) {
             if (existingDowntime.isActive) {
-                // Already active — no changes needed, duration will be calculated in endDowntime
+                // Already active — update duration and ensure endTime is null for ongoing
                 const currentSegmentHours = calculateDurationInHours(existingDowntime.startTime, now);
-                console.log(`Downtime already active for Machine ${machine_id}. Previous segments: ${(existingDowntime.machinedownByHR || 0).toFixed(2)}h, Current segment: ${currentSegmentHours.toFixed(2)}h`);
+                existingDowntime.machinedownByHR = (existingDowntime.machinedownByHR || 0) + currentSegmentHours;
+                existingDowntime.startTime = now; // Reset start of this segment for next calculation
+                existingDowntime.endTime = null; // Ensure endTime is null for active records
+                await existingDowntime.save();
+                console.log(`Updated active downtime for Machine ${machine_id}. Total: ${existingDowntime.machinedownByHR.toFixed(2)}h`);
             } else {
                 // Was inactive (previous DOWN ended) — reactivate with a new segment
                 existingDowntime.isActive = true;
                 existingDowntime.startTime = now; // New segment starts now
-                existingDowntime.endTime = undefined; // Clear previous endTime
+                existingDowntime.endTime = null; // Clear previous endTime
                 await existingDowntime.save();
                 console.log(`Reactivated existing downtime for Machine ${machine_id}. Accumulated hours so far: ${(existingDowntime.machinedownByHR || 0).toFixed(2)}`);
             }
