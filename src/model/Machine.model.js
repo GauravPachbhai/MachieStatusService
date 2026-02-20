@@ -24,15 +24,15 @@ const MachineSchema = new mongoose.Schema(
       ref: "Customer",
       required: true,
     },
-    tonnage:{
+    tonnage: {
       type: String,
       required: true,
     },
-    make:{
+    make: {
       type: String,
       required: true,
     },
-    dateofpurchase:{
+    dateofpurchase: {
       type: Date,
       required: true,
     },
@@ -41,7 +41,10 @@ const MachineSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
-
+    downStartedAt: {
+      type: Date,
+      required: false,
+    },
     // Audit fields
     created_at: {
       type: Date,
