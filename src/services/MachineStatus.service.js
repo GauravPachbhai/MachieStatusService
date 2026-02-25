@@ -4,8 +4,8 @@ import MoulditDevice from "../model/MoulditDevice.js";
 import Customer from "../model/Customer.js";
 import { startDowntime, endDowntime } from "./Downtime.service.js";
 
-const LOOKBACK_MINUTES = 5;
-const DOWN_THRESHOLD_MINUTES = 10;
+const LOOKBACK_MINUTES = 2;
+const DOWN_THRESHOLD_MINUTES = 5;
 
 const getISODate = (date, timezone = "Asia/Kolkata") =>
   new Intl.DateTimeFormat("en-CA", {
