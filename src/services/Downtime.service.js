@@ -48,13 +48,9 @@ export const startDowntime = async (machine_id) => {
 
         if (existingDowntime) {
             if (existingDowntime.isActive) {
-                // Already active — update duration and ensure endTime is null for ongoing
-                const currentSegmentHours = calculateDurationInHours(existingDowntime.startTime, now);
-                existingDowntime.machinedownByHR = (existingDowntime.machinedownByHR || 0) + currentSegmentHours;
-                existingDowntime.startTime = now; // Reset start of this segment for next calculation
-                existingDowntime.endTime = null; // Ensure endTime is null for active records
-                await existingDowntime.save();
-                console.log(`Updated active downtime for Machine ${machine_id}. Total: ${existingDowntime.machinedownByHR.toFixed(2)}h`);
+                // Already active — do nothing. startTime is already the beginning of this segment.
+                // machinedownByHR will be updated when the segment ends or day splits.
+                console.log(`Downtime already active for Machine ${machine_id}. Stays at original startTime: ${existingDowntime.startTime}`);
             } else {
                 // Was inactive (previous DOWN ended) — reactivate with a new segment
                 existingDowntime.isActive = true;
@@ -109,13 +105,13 @@ export const endDowntime = async (machine_id) => {
             return null;
         }
 
-        // Calculate duration of THIS segment only
+        // Calculate duration of the CURRENT segment
         const segmentDurationHours = calculateDurationInHours(
             activeDowntime.startTime,
             now
         );
 
-        // Accumulate: add this segment's duration to existing total
+        // Accumulate: add this segment's duration to existing total for the day
         activeDowntime.machinedownByHR = (activeDowntime.machinedownByHR || 0) + segmentDurationHours;
         activeDowntime.endTime = now;
         activeDowntime.isActive = false;
