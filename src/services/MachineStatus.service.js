@@ -41,10 +41,18 @@ export const evaluateMachineStatuses = async () => {
       const timezone = customer?.timezone || "Asia/Kolkata";
       const today = getISODate(now, timezone);
 
-      const previousStatus = await MachineStatus.findOne({
+      // Fetch status for the current day first
+      let lastKnownStatus = await MachineStatus.findOne({
         imei,
         date: today,
       });
+
+      // If no status for today exists (first run of the day), fetch the absolute latest status to inherit state
+      if (!lastKnownStatus) {
+        lastKnownStatus = await MachineStatus.findOne({
+          imei,
+        }).sort({ createdAt: -1 });
+      }
 
       // ---- 1️⃣ Fetch telemetry in lookback window ----
       const since = new Date(
@@ -66,7 +74,7 @@ export const evaluateMachineStatuses = async () => {
       let hasProduction = false;
       let firstProd = null;
       let lastProd = null;
-      let lastSeenAt = null;
+      let lastSeenAt = lastKnownStatus?.lastSeenAt ?? null;
 
       for (const r of records) {
         lastSeenAt = r.createdAt;
@@ -91,7 +99,7 @@ export const evaluateMachineStatuses = async () => {
 
       // ---- 3️⃣ Status decision ----
       let status = "RUNNING";
-      let downStartedAt = previousStatus?.downStartedAt ?? null;
+      let downStartedAt = lastKnownStatus?.downStartedAt ?? null;
       let downReason = null;
 
       if (!hasProduction) {
@@ -130,7 +138,7 @@ export const evaluateMachineStatuses = async () => {
         downStartedAt = null;
       }
 
-      const oldStatus = previousStatus?.status;
+      const oldStatus = lastKnownStatus?.status;
 
       // ---- 4️⃣ Persist MachineStatus ----
       await MachineStatus.findOneAndUpdate(
