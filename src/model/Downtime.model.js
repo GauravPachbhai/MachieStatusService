@@ -23,10 +23,17 @@ const DowntimeSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Start time of downtime
+    // Start time of downtime — always the FIRST DOWN moment of the day, never overwritten
     startTime: {
       type: Date,
       required: true,
+    },
+
+    // Start time of the CURRENT active segment (updated each time machine goes DOWN again)
+    // Used to calculate duration for the ongoing segment without resetting startTime
+    lastSegmentStartTime: {
+      type: Date,
+      required: false,
     },
 
     // End time of downtime (optional for ongoing downtimes)

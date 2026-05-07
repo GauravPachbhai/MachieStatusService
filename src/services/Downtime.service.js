@@ -48,16 +48,17 @@ export const startDowntime = async (machine_id) => {
 
         if (existingDowntime) {
             if (existingDowntime.isActive) {
-                // Already active — do nothing. startTime is already the beginning of this segment.
-                // machinedownByHR will be updated when the segment ends or day splits.
-                console.log(`Downtime already active for Machine ${machine_id}. Stays at original startTime: ${existingDowntime.startTime}`);
+                // Already active — do nothing. startTime & lastSegmentStartTime are already set.
+                console.log(`Downtime already active for Machine ${machine_id}. Original startTime: ${existingDowntime.startTime}, segment started: ${existingDowntime.lastSegmentStartTime}`);
             } else {
-                // Was inactive (previous DOWN ended) — reactivate with a new segment
+                // Was inactive (previous DOWN ended) — reactivate with a NEW segment.
+                // ✅ Do NOT overwrite startTime — it marks the first DOWN moment of this day.
+                // Only update lastSegmentStartTime to track the new segment's start.
                 existingDowntime.isActive = true;
-                existingDowntime.startTime = now; // New segment starts now
-                existingDowntime.endTime = null; // Clear previous endTime
+                existingDowntime.lastSegmentStartTime = now; // New segment starts now
+                existingDowntime.endTime = null;             // Clear previous endTime
                 await existingDowntime.save();
-                console.log(`Reactivated existing downtime for Machine ${machine_id}. Accumulated hours so far: ${(existingDowntime.machinedownByHR || 0).toFixed(2)}`);
+                console.log(`Reactivated existing downtime for Machine ${machine_id}. Accumulated hours so far: ${(existingDowntime.machinedownByHR || 0).toFixed(2)}h. New segment start: ${now}`);
             }
             return existingDowntime;
         }
@@ -66,7 +67,8 @@ export const startDowntime = async (machine_id) => {
             machine_id,
             company_id: machine.customer_id,
             date: today,
-            startTime: now,
+            startTime: now,             // First DOWN moment of the day — never overwritten
+            lastSegmentStartTime: now,  // Tracks the current segment — updated on each reactivation
             machinedownByHR: 0,
             isActive: true,
             reason: "Machine Status: DOWN",
@@ -105,11 +107,11 @@ export const endDowntime = async (machine_id) => {
             return null;
         }
 
-        // Calculate duration of the CURRENT segment
-        const segmentDurationHours = calculateDurationInHours(
-            activeDowntime.startTime,
-            now
-        );
+        // Calculate duration of the CURRENT segment using lastSegmentStartTime.
+        // This is safe even for legacy records that don't have lastSegmentStartTime
+        // (falls back to startTime so old data is never broken).
+        const segmentStart = activeDowntime.lastSegmentStartTime ?? activeDowntime.startTime;
+        const segmentDurationHours = calculateDurationInHours(segmentStart, now);
 
         // Accumulate: add this segment's duration to existing total for the day
         activeDowntime.machinedownByHR = (activeDowntime.machinedownByHR || 0) + segmentDurationHours;
@@ -118,7 +120,7 @@ export const endDowntime = async (machine_id) => {
         await activeDowntime.save();
 
         console.log(
-            `Ended downtime for machine ${machine_id}. Segment: ${segmentDurationHours.toFixed(2)}h, Total today: ${activeDowntime.machinedownByHR.toFixed(2)}h`
+            `Ended downtime for machine ${machine_id}. Segment start: ${segmentStart}, duration: ${segmentDurationHours.toFixed(2)}h, Total today: ${activeDowntime.machinedownByHR.toFixed(2)}h`
         );
         return activeDowntime;
     } catch (error) {
@@ -159,23 +161,25 @@ export const splitDowntimesAtMidnight = async () => {
                     const startOfNextDay = new Date(new Date(currentDate + "T00:00:00.000").toLocaleString("en-US", { timeZone: timezone }));
                     const endOfPrevDay = new Date(startOfNextDay.getTime() - 1);
 
-                    // Close the previous downtime
-                    const durationHours = calculateDurationInHours(
-                        downtime.startTime,
-                        endOfPrevDay
-                    );
+                    // Close the previous day's downtime segment.
+                    // Use lastSegmentStartTime for duration if available (falls back to startTime for legacy docs).
+                    const segmentStart = downtime.lastSegmentStartTime ?? downtime.startTime;
+                    const durationHours = calculateDurationInHours(segmentStart, endOfPrevDay);
 
                     downtime.endTime = endOfPrevDay;
                     downtime.machinedownByHR = (downtime.machinedownByHR || 0) + durationHours;
                     downtime.isActive = false;
                     await downtime.save();
 
-                    // Create new downtime for today starting at 00:00:00
+                    // Create new downtime for today starting at midnight.
+                    // Both startTime and lastSegmentStartTime start at midnight for the new day.
                     await Downtime.create({
                         machine_id: downtime.machine_id,
                         company_id: downtime.company_id,
                         date: currentDate,
-                        startTime: startOfNextDay,
+                        startTime: startOfNextDay,           // First DOWN moment of this new day
+                        lastSegmentStartTime: startOfNextDay, // Current segment also starts at midnight
+                        machinedownByHR: 0,
                         isActive: true,
                         reason: downtime.reason,
                     });
