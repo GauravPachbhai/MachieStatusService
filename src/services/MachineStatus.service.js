@@ -2,7 +2,7 @@ import Machine from "../model/Machine.js";
 import MachineStatus from "../model/MachineStatus.js";
 import MoulditDevice from "../model/MoulditDevice.js";
 import Customer from "../model/Customer.js";
-import { startDowntime, endDowntime } from "./Downtime.service.js";
+import { startDowntime, endDowntime, startDowntimeInterval, endDowntimeInterval } from "./Downtime.service.js";
 
 const LOOKBACK_MINUTES = 2;
 const DOWN_THRESHOLD_MINUTES = 5;
@@ -157,12 +157,24 @@ export const evaluateMachineStatuses = async () => {
 
       // ---- 5️⃣ Downtime accounting ----
       if (status === "DOWN") {
-        await startDowntime(machine._id);
+        // Run existing Downtime + new DowntimeInterval in parallel
+        await Promise.all([
+          startDowntime(machine._id),
+          startDowntimeInterval(machine._id).catch((err) =>
+            console.error(`[DowntimeInterval] Non-blocking error for machine ${machine._id}:`, err)
+          ),
+        ]);
         console.log(
           `⬇️ ${machine.machineNameL} → DOWN [${downReason}]`
         );
       } else if (oldStatus === "DOWN") {
-        await endDowntime(machine._id);
+        // Run existing Downtime + new DowntimeInterval in parallel
+        await Promise.all([
+          endDowntime(machine._id),
+          endDowntimeInterval(machine._id).catch((err) =>
+            console.error(`[DowntimeInterval] Non-blocking error for machine ${machine._id}:`, err)
+          ),
+        ]);
         console.log(
           `⬆️ ${machine.machineNameL} → RUNNING (Recovered from DOWN)`
         );

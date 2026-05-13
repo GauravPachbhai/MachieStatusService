@@ -1,4 +1,5 @@
 import Downtime from "../model/Downtime.model.js";
+import DowntimeInterval from "../model/DowntimeInterval.model.js";
 import Machine from "../model/Machine.js";
 
 import Customer from "../model/Customer.js";
@@ -196,5 +197,113 @@ export const splitDowntimesAtMidnight = async () => {
     } catch (error) {
         console.error("Error in splitDowntimesAtMidnight:", error);
         throw error;
+    }
+};
+
+// =============================================================================
+// DowntimeInterval — Parallel interval tracking (does NOT affect Downtime)
+// =============================================================================
+
+/**
+ * Start a new DowntimeInterval when a machine transitions RUNNING → DOWN.
+ *
+ * Rules:
+ *  - If an active interval already exists for this machine → do nothing (idempotent).
+ *  - One document = one continuous uninterrupted downtime interval.
+ *
+ * @param {ObjectId} machine_id
+ * @returns {Promise<Object>} The created or existing interval document
+ */
+export const startDowntimeInterval = async (machine_id) => {
+    try {
+        const machine = await Machine.findById(machine_id).select("customer_id");
+        if (!machine) {
+            console.error(`[DowntimeInterval] Machine ${machine_id} not found`);
+            return null;
+        }
+
+        // Guard: do not create a duplicate if there is already an active interval
+        const existing = await DowntimeInterval.findOne({
+            machine_id,
+            isActive: true,
+        });
+
+        if (existing) {
+            console.log(
+                `[DowntimeInterval] Active interval already exists for machine ${machine_id} (started ${existing.startTime}). Skipping.`
+            );
+            return existing;
+        }
+
+        const now = new Date();
+
+        const interval = await DowntimeInterval.create({
+            machine_id,
+            company_id: machine.customer_id,
+            startTime: now,
+            endTime: null,
+            isActive: true,
+            reason: "Machine Status: DOWN",
+        });
+
+        console.log(
+            `[DowntimeInterval] Created new interval for machine ${machine_id} at ${now.toISOString()}`
+        );
+        return interval;
+    } catch (error) {
+        // Interval tracking must never break the main Downtime flow
+        console.error(
+            `[DowntimeInterval] Error starting interval for machine ${machine_id}:`,
+            error
+        );
+        return null;
+    }
+};
+
+/**
+ * Close the active DowntimeInterval when a machine transitions DOWN → RUNNING.
+ *
+ * Rules:
+ *  - Find the single active interval for this machine.
+ *  - Set endTime = now, isActive = false.
+ *  - If no active interval exists → log and return null (graceful).
+ *
+ * @param {ObjectId} machine_id
+ * @returns {Promise<Object|null>} The closed interval, or null
+ */
+export const endDowntimeInterval = async (machine_id) => {
+    try {
+        const now = new Date();
+
+        const activeInterval = await DowntimeInterval.findOne({
+            machine_id,
+            isActive: true,
+        });
+
+        if (!activeInterval) {
+            console.log(
+                `[DowntimeInterval] No active interval found for machine ${machine_id}. Nothing to close.`
+            );
+            return null;
+        }
+
+        activeInterval.endTime = now;
+        activeInterval.isActive = false;
+        await activeInterval.save();
+
+        const durationMs = now - activeInterval.startTime;
+        const durationMin = (durationMs / (1000 * 60)).toFixed(2);
+
+        console.log(
+            `[DowntimeInterval] Closed interval for machine ${machine_id}. ` +
+            `Duration: ${durationMin} min (${activeInterval.startTime.toISOString()} → ${now.toISOString()})`
+        );
+        return activeInterval;
+    } catch (error) {
+        console.error(
+            `[DowntimeInterval] Error ending interval for machine ${machine_id}:`,
+            error
+        );
+        return null;
     }
 };
