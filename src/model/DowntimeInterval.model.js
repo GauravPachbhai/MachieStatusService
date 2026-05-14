@@ -113,17 +113,6 @@ DowntimeIntervalSchema.index({
     isActive: 1,
 });
 
-/**
- * =====================================================
- * AUTO UPDATE updated_at
- * =====================================================
- */
-
-DowntimeIntervalSchema.pre("save", function (next) {
-    this.updated_at = new Date();
-    next();
-});
-
 export default mongoose.model(
     "DowntimeInterval",
     DowntimeIntervalSchema
